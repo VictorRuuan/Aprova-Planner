@@ -8,6 +8,7 @@ import { Subjects } from "../pages/Subjects";
 import { Schedule } from "../pages/Schedule";
 import { StudySession } from "../pages/StudySession";
 import { Reports } from "../pages/Reports";
+import { Profile } from "../pages/Profile";
 
 import { SupabaseTest } from "../pages/SupabaseTest";
 import { ProtectedRoute } from "./ProtectedRoute";
@@ -31,6 +32,7 @@ export function AppRoutes() {
         <Route path="/schedule" element={protectedPage(<Schedule />)} />
         <Route path="/study-session" element={protectedPage(<StudySession />)} />
         <Route path="/reports" element={protectedPage(<Reports />)} />
+        <Route path="/profile" element={protectedPage(<Profile />)} />
 
         <Route path="/supabase-test" element={protectedPage(<SupabaseTest />)} />
       </Routes>

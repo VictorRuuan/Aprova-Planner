@@ -1,9 +1,12 @@
-import { useEffect, useState } from "react";
-import { Trash2 } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Pencil, Trash2 } from "lucide-react";
 
 import { AppLayout } from "../components/layout/AppLayout.tsx";
 import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
+import { ConfirmDialog } from "../components/ui/ConfirmDialog";
+import { inputClass, labelClass } from "../components/ui/Form";
+import { Toast, type ToastState } from "../components/ui/Toast";
 import {
   createSubject,
   deleteSubject,
@@ -12,28 +15,43 @@ import {
   getErrorMessage,
   getExamName,
   getSubjectName,
+  updateSubject,
   type ExamRecord,
   type SubjectRecord,
 } from "../services/plannerData";
 
-const inputClass =
-  "mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-500 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100";
+type SubjectForm = {
+  name: string;
+  examId: string;
+  weight: string;
+  difficulty: string;
+  priority: string;
+};
+
+const emptyForm: SubjectForm = {
+  name: "",
+  examId: "",
+  weight: "",
+  difficulty: "",
+  priority: "",
+};
 
 export function Subjects() {
   const [subjects, setSubjects] = useState<SubjectRecord[]>([]);
   const [exams, setExams] = useState<ExamRecord[]>([]);
+  const [selectedExamId, setSelectedExamId] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [deletingId, setDeletingId] = useState<string | number | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [showForm, setShowForm] = useState(false);
+  const [editingSubject, setEditingSubject] = useState<SubjectRecord | null>(
+    null,
+  );
+  const [subjectToDelete, setSubjectToDelete] =
+    useState<SubjectRecord | null>(null);
+  const [toast, setToast] = useState<ToastState>(null);
   const [error, setError] = useState("");
-  const [form, setForm] = useState({
-    name: "",
-    examId: "",
-    weight: "",
-    difficulty: "",
-    priority: "",
-  });
+  const [form, setForm] = useState<SubjectForm>(emptyForm);
 
   useEffect(() => {
     async function loadSubjects() {
@@ -55,21 +73,57 @@ export function Subjects() {
     loadSubjects();
   }, []);
 
+  const examById = useMemo(
+    () => new Map(exams.map((exam) => [String(exam.id), exam])),
+    [exams],
+  );
+
+  const filteredSubjects = selectedExamId
+    ? subjects.filter((subject) => String(subject.exam_id) === selectedExamId)
+    : subjects;
+
+  function openCreateForm() {
+    setEditingSubject(null);
+    setForm({ ...emptyForm, examId: selectedExamId });
+    setShowForm(true);
+  }
+
+  function openEditForm(subject: SubjectRecord) {
+    setEditingSubject(subject);
+    setForm({
+      name: getSubjectName(subject),
+      examId: subject.exam_id ? String(subject.exam_id) : "",
+      weight: subject.weight ? String(subject.weight) : "",
+      difficulty: subject.difficulty ? String(subject.difficulty) : "",
+      priority: subject.priority ? String(subject.priority) : "",
+    });
+    setShowForm(true);
+  }
+
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSaving(true);
     setError("");
 
     try {
-      const createdSubject = await createSubject(form);
-      setSubjects((current) => [createdSubject, ...current]);
-      setForm({
-        name: "",
-        examId: "",
-        weight: "",
-        difficulty: "",
-        priority: "",
-      });
+      if (editingSubject) {
+        const updatedSubject = await updateSubject(editingSubject.id, form);
+        setSubjects((current) =>
+          current.map((subject) =>
+            String(subject.id) === String(updatedSubject.id)
+              ? updatedSubject
+              : subject,
+          ),
+        );
+        setToast({ type: "success", message: "Materia atualizada." });
+      } else {
+        const createdSubject = await createSubject(form);
+        setSubjects((current) => [createdSubject, ...current]);
+        setToast({ type: "success", message: "Materia salva." });
+      }
+
+      setForm(emptyForm);
+      setEditingSubject(null);
       setShowForm(false);
     } catch (err) {
       setError(getErrorMessage(err, "Erro ao salvar materia."));
@@ -78,26 +132,25 @@ export function Subjects() {
     }
   }
 
-  async function handleDelete(subject: SubjectRecord) {
-    const subjectName = getSubjectName(subject);
-    const shouldDelete = window.confirm(
-      `Excluir a materia "${subjectName}"? Essa acao nao pode ser desfeita.`,
-    );
+  async function handleDelete() {
+    if (!subjectToDelete) return;
 
-    if (!shouldDelete) return;
-
-    setDeletingId(subject.id);
+    setDeleting(true);
     setError("");
 
     try {
-      await deleteSubject(subject.id);
+      await deleteSubject(subjectToDelete.id);
       setSubjects((current) =>
-        current.filter((item) => String(item.id) !== String(subject.id)),
+        current.filter(
+          (subject) => String(subject.id) !== String(subjectToDelete.id),
+        ),
       );
+      setToast({ type: "success", message: "Materia excluida." });
+      setSubjectToDelete(null);
     } catch (err) {
       setError(getErrorMessage(err, "Erro ao excluir materia."));
     } finally {
-      setDeletingId(null);
+      setDeleting(false);
     }
   }
 
@@ -106,20 +159,48 @@ export function Subjects() {
       title="Materias"
       description="Organize as disciplinas do edital por peso, dificuldade e prioridade."
     >
+      <Toast toast={toast} onClose={() => setToast(null)} />
+      <ConfirmDialog
+        open={!!subjectToDelete}
+        title="Excluir materia"
+        description={`Voce esta prestes a excluir "${subjectToDelete ? getSubjectName(subjectToDelete) : ""}".`}
+        loading={deleting}
+        onCancel={() => setSubjectToDelete(null)}
+        onConfirm={handleDelete}
+      />
+
       <Card>
-        <div className="flex items-center justify-between gap-4">
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div>
             <h3 className="font-semibold text-slate-900 dark:text-slate-100">
               Lista de materias
             </h3>
             <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-              Cadastre as disciplinas e vincule a um concurso quando quiser.
+              Filtre por concurso, edite ou exclua disciplinas.
             </p>
           </div>
 
-          <Button type="button" onClick={() => setShowForm((value) => !value)}>
-            {showForm ? "Cancelar" : "Nova materia"}
-          </Button>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <select
+              value={selectedExamId}
+              onChange={(event) => setSelectedExamId(event.target.value)}
+              className={inputClass}
+            >
+              <option value="">Todos os concursos</option>
+              {exams.map((exam) => (
+                <option key={exam.id} value={exam.id}>
+                  {getExamName(exam)}
+                </option>
+              ))}
+            </select>
+
+            <Button
+              type="button"
+              onClick={showForm ? () => setShowForm(false) : openCreateForm}
+            >
+              {showForm ? "Cancelar" : "Nova materia"}
+            </Button>
+          </div>
         </div>
 
         {showForm && (
@@ -127,22 +208,19 @@ export function Subjects() {
             onSubmit={handleSubmit}
             className="mt-4 grid gap-3 rounded-xl bg-slate-50 p-4 dark:bg-slate-800 md:grid-cols-5"
           >
-            <label className="text-sm font-medium text-slate-700 dark:text-slate-300 md:col-span-2">
+            <label className={`${labelClass} md:col-span-2`}>
               Nome
               <input
                 value={form.name}
                 onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    name: event.target.value,
-                  }))
+                  setForm((current) => ({ ...current, name: event.target.value }))
                 }
                 className={inputClass}
                 required
               />
             </label>
 
-            <label className="text-sm font-medium text-slate-700 dark:text-slate-300 md:col-span-3">
+            <label className={`${labelClass} md:col-span-3`}>
               Concurso
               <select
                 value={form.examId}
@@ -163,7 +241,7 @@ export function Subjects() {
               </select>
             </label>
 
-            <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+            <label className={labelClass}>
               Peso
               <input
                 value={form.weight}
@@ -179,7 +257,7 @@ export function Subjects() {
               />
             </label>
 
-            <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+            <label className={labelClass}>
               Dificuldade
               <input
                 value={form.difficulty}
@@ -195,7 +273,7 @@ export function Subjects() {
               />
             </label>
 
-            <label className="text-sm font-medium text-slate-700 dark:text-slate-300">
+            <label className={labelClass}>
               Prioridade
               <input
                 value={form.priority}
@@ -213,7 +291,11 @@ export function Subjects() {
 
             <div className="md:col-span-5">
               <Button disabled={saving}>
-                {saving ? "Salvando..." : "Salvar materia"}
+                {saving
+                  ? "Salvando..."
+                  : editingSubject
+                    ? "Atualizar materia"
+                    : "Salvar materia"}
               </Button>
             </div>
           </form>
@@ -231,42 +313,63 @@ export function Subjects() {
           </p>
         )}
 
-        {!loading && subjects.length === 0 && (
+        {!loading && filteredSubjects.length === 0 && (
           <p className="mt-4 text-sm text-slate-500 dark:text-slate-400">
-            Nenhuma materia cadastrada no banco de dados.
+            Nenhuma materia encontrada.
           </p>
         )}
 
         <div className="mt-4 divide-y divide-slate-100 dark:divide-slate-800">
-          {subjects.map((subject) => (
-            <div
-              key={subject.id}
-              className="grid items-center gap-2 py-3 text-sm md:grid-cols-[1fr_120px_140px_120px_44px]"
-            >
-              <p className="font-medium text-slate-900 dark:text-slate-100">
-                {getSubjectName(subject)}
-              </p>
-              <p className="text-slate-500 dark:text-slate-400">
-                Peso: {subject.weight ?? "-"}
-              </p>
-              <p className="text-slate-500 dark:text-slate-400">
-                Dificuldade: {subject.difficulty ?? "-"}
-              </p>
-              <p className="text-slate-500 dark:text-slate-400">
-                Prioridade: {subject.priority ?? "-"}
-              </p>
-              <button
-                type="button"
-                onClick={() => handleDelete(subject)}
-                disabled={deletingId === subject.id}
-                aria-label="Excluir materia"
-                title="Excluir materia"
-                className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-red-200 text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-900 dark:text-red-300 dark:hover:bg-red-950"
+          {filteredSubjects.map((subject) => {
+            const exam = subject.exam_id
+              ? examById.get(String(subject.exam_id))
+              : undefined;
+
+            return (
+              <div
+                key={subject.id}
+                className="grid items-center gap-2 py-3 text-sm md:grid-cols-[1fr_150px_100px_120px_100px_88px]"
               >
-                <Trash2 size={17} />
-              </button>
-            </div>
-          ))}
+                <div>
+                  <p className="font-medium text-slate-900 dark:text-slate-100">
+                    {getSubjectName(subject)}
+                  </p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    {exam ? getExamName(exam) : "Sem concurso"}
+                  </p>
+                </div>
+                <p className="text-slate-500 dark:text-slate-400">
+                  Peso: {subject.weight ?? "-"}
+                </p>
+                <p className="text-slate-500 dark:text-slate-400">
+                  Dificuldade: {subject.difficulty ?? "-"}
+                </p>
+                <p className="text-slate-500 dark:text-slate-400">
+                  Prioridade: {subject.priority ?? "-"}
+                </p>
+                <div className="flex gap-2 md:justify-end md:col-span-2">
+                  <button
+                    type="button"
+                    onClick={() => openEditForm(subject)}
+                    aria-label="Editar materia"
+                    title="Editar materia"
+                    className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                  >
+                    <Pencil size={17} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSubjectToDelete(subject)}
+                    aria-label="Excluir materia"
+                    title="Excluir materia"
+                    className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-red-200 text-red-600 transition hover:bg-red-50 dark:border-red-900 dark:text-red-300 dark:hover:bg-red-950"
+                  >
+                    <Trash2 size={17} />
+                  </button>
+                </div>
+              </div>
+            );
+          })}
         </div>
       </Card>
     </AppLayout>

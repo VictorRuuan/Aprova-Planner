@@ -187,6 +187,35 @@ export async function createExam(input: {
   ]);
 }
 
+export async function updateExam(
+  id: string | number,
+  input: {
+    name: string;
+    organization?: string;
+    examDate?: string;
+  },
+) {
+  const { data, error } = await supabase
+    .from("exams")
+    .update({
+      name: input.name,
+      board: input.organization || null,
+      exam_date: input.examDate || null,
+    })
+    .eq("id", id)
+    .select()
+    .single();
+
+  if (error) throw error;
+  return data as ExamRecord;
+}
+
+export async function deleteExam(id: string | number) {
+  const { error } = await supabase.from("exams").delete().eq("id", id);
+
+  if (error) throw error;
+}
+
 export async function createSubject(input: {
   name: string;
   examId?: string;
@@ -213,6 +242,33 @@ export async function createSubject(input: {
       name: input.name,
     },
   ]);
+}
+
+export async function updateSubject(
+  id: string | number,
+  input: {
+    name: string;
+    examId?: string;
+    weight?: string;
+    difficulty?: string;
+    priority?: string;
+  },
+) {
+  const { data, error } = await supabase
+    .from("subjects")
+    .update({
+      name: input.name,
+      exam_id: input.examId || null,
+      weight: input.weight || null,
+      difficulty: input.difficulty || null,
+      priority: input.priority || null,
+    })
+    .eq("id", id)
+    .select()
+    .single();
+
+  if (error) throw error;
+  return data as SubjectRecord;
 }
 
 export async function deleteSubject(id: string | number) {
@@ -245,6 +301,37 @@ export async function createScheduleItem(input: {
       scheduled_at: input.scheduledAt,
     },
   ]);
+}
+
+export async function updateScheduleItem(
+  id: string | number,
+  input: {
+    subjectId?: string;
+    title?: string;
+    scheduledAt: string;
+    studyType?: string;
+  },
+) {
+  const { data, error } = await supabase
+    .from("schedule_items")
+    .update({
+      subject_id: input.subjectId || null,
+      title: input.title || null,
+      scheduled_at: input.scheduledAt,
+      study_type: input.studyType || null,
+    })
+    .eq("id", id)
+    .select()
+    .single();
+
+  if (error) throw error;
+  return data as ScheduleItemRecord;
+}
+
+export async function deleteScheduleItem(id: string | number) {
+  const { error } = await supabase.from("schedule_items").delete().eq("id", id);
+
+  if (error) throw error;
 }
 
 export async function createStudySession(input: {
@@ -283,6 +370,37 @@ export async function createStudySession(input: {
       studied_at: input.studiedAt,
     },
   ]);
+}
+
+export async function updateStudySession(
+  id: string | number,
+  input: {
+    subjectId?: string;
+    durationMinutes: string;
+    questionsDone?: string;
+    correctAnswers?: string;
+  },
+) {
+  const { data, error } = await supabase
+    .from("study_sessions")
+    .update({
+      subject_id: input.subjectId || null,
+      studied_minutes: input.durationMinutes,
+      questions_done: input.questionsDone || null,
+      correct_answers: input.correctAnswers || null,
+    })
+    .eq("id", id)
+    .select()
+    .single();
+
+  if (error) throw error;
+  return data as StudySessionRecord;
+}
+
+export async function deleteStudySession(id: string | number) {
+  const { error } = await supabase.from("study_sessions").delete().eq("id", id);
+
+  if (error) throw error;
 }
 
 export function getExamName(exam: ExamRecord) {
