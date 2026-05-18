@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { AppLayout } from "../components/layout/AppLayout.tsx";
+import { Button } from "../components/ui/Button";
 import { Card } from "../components/ui/Card";
 import { inputClass } from "../components/ui/Form";
 import {
@@ -33,6 +34,11 @@ type GoalSettings = {
   weeklyReviews: string;
 };
 
+type AiSource = {
+  title: string;
+  url: string;
+};
+
 const defaultGoals: GoalSettings = {
   dailyMinutes: "120",
   dailyQuestions: "50",
@@ -50,6 +56,17 @@ export function Dashboard() {
   const [today] = useState(() => Date.now());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState("");
+  const [aiAnswer, setAiAnswer] = useState("");
+  const [aiSources, setAiSources] = useState<AiSource[]>([]);
+  const [aiResearch, setAiResearch] = useState({
+    contest: "",
+    board: "",
+    role: "",
+    location: "",
+    details: "",
+  });
   const [goals] = useState<GoalSettings>(() => {
     const savedGoals = localStorage.getItem("aprova-planner-goals");
     return savedGoals ? JSON.parse(savedGoals) : defaultGoals;
@@ -195,6 +212,121 @@ export function Dashboard() {
   const weeklyProgress =
     weeklyGoal > 0 ? Math.min(100, Math.round((weeklyMinutes / weeklyGoal) * 100)) : 0;
 
+  async function generateAiPlan() {
+    setAiLoading(true);
+    setAiError("");
+    setAiAnswer("");
+    setAiSources([]);
+
+    const contestFromSelection = nextExam ? getExamName(nextExam.exam) : "";
+    const contest = aiResearch.contest.trim() || contestFromSelection;
+    const board = aiResearch.board.trim();
+    const role = aiResearch.role.trim();
+    const location = aiResearch.location.trim();
+    const details = aiResearch.details.trim();
+
+    const subjectsSummary = subjectStats.slice(0, 8).map((item) => ({
+      materia: getSubjectName(item.subject),
+      acerto: `${item.accuracy}%`,
+      questoes: item.questions,
+      prioridade: item.priority,
+    }));
+
+    const nextStudies = data.scheduleItems.slice(0, 5).map((item) => {
+      const subject = item.subject_id
+        ? subjectById.get(String(item.subject_id))
+        : undefined;
+
+      return {
+        materia: item.subject_name || item.title || getSubjectName(subject),
+        data: formatDateTime(item.scheduled_at || item.date),
+        tipo: item.study_type || item.type || "Estudo",
+      };
+    });
+
+    const prompt = `
+Pesquise na internet informacoes atuais e confiaveis sobre este concurso:
+
+Concurso: ${contest || "Nao informado"}
+Banca: ${board || "Nao informada"}
+Cargo/area: ${role || "Nao informado"}
+Local/UF/orgao: ${location || "Nao informado"}
+Detalhes adicionais: ${details || "Nenhum"}
+
+Use preferencialmente edital, pagina oficial do orgao, pagina da banca, PCI Concursos, Qconcursos, Estrategia, Direcao Concursos ou fontes educacionais confiaveis. Nao invente dados: se nao encontrar conteudo programatico confirmado, diga que e uma estimativa.
+
+Depois, crie um plano de estudos pratico para os proximos 7 dias com base nestes dados do usuario:
+
+Dias ate a prova: ${daysUntilExam ?? "Nao informado"}
+Horas estudadas no total: ${Math.round(totalMinutes / 60)}
+Questoes feitas: ${totalQuestions}
+Taxa de acerto geral: ${accuracy}%
+Meta diaria: ${goals.dailyMinutes} minutos e ${goals.dailyQuestions} questoes
+Meta semanal de revisoes: ${goals.weeklyReviews}
+Progresso semanal: ${Math.round(weeklyMinutes / 60)}h de ${Math.round(weeklyGoal / 60)}h
+
+Materias e desempenho:
+${JSON.stringify(subjectsSummary, null, 2)}
+
+Proximos estudos ja agendados:
+${JSON.stringify(nextStudies, null, 2)}
+
+Entregue:
+1. Fontes encontradas e nivel de confianca.
+2. Materias provaveis ou confirmadas.
+3. Assuntos principais para estudar em cada materia.
+4. Prioridades da semana.
+5. Plano por dia, de forma resumida.
+6. Como distribuir teoria, questoes e revisao.
+7. Um alerta sobre o maior risco atual.
+`;
+
+    try {
+      const response = await fetch("/api/ai", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt, webSearch: true }),
+      });
+      const rawResult = await response.text();
+      let result: {
+        answer?: string;
+        error?: string;
+        sources?: AiSource[];
+      } = {};
+
+      try {
+        result = rawResult ? JSON.parse(rawResult) : {};
+      } catch {
+        throw new Error(
+          "A rota /api/ai nao respondeu JSON. Se estiver rodando localmente, use vercel dev em vez de npm run dev.",
+        );
+      }
+
+      if (!response.ok && !result.error) {
+        throw new Error(
+          `A rota /api/ai respondeu status ${response.status}. Se estiver local, rode com vercel dev.`,
+        );
+      }
+
+      const parsedResult = result as {
+        answer?: string;
+        error?: string;
+        sources?: AiSource[];
+      };
+
+      if (!response.ok) {
+        throw new Error(parsedResult.error || "Nao foi possivel gerar o plano.");
+      }
+
+      setAiAnswer(parsedResult.answer || "A IA nao retornou uma resposta.");
+      setAiSources(parsedResult.sources ?? []);
+    } catch (err) {
+      setAiError(getErrorMessage(err, "Erro ao gerar plano com IA."));
+    } finally {
+      setAiLoading(false);
+    }
+  }
+
   return (
     <AppLayout
       title="Dashboard"
@@ -260,6 +392,109 @@ export function Dashboard() {
       </div>
 
       <div className="mt-6 grid gap-4 lg:grid-cols-3">
+        <Card title="Plano com IA">
+          <p className="text-sm text-slate-500 dark:text-slate-400">
+            Pesquise edital, materias e assuntos para montar uma recomendacao
+            personalizada.
+          </p>
+          <div className="mt-4 grid gap-3">
+            <input
+              value={aiResearch.contest}
+              onChange={(event) =>
+                setAiResearch((current) => ({
+                  ...current,
+                  contest: event.target.value,
+                }))
+              }
+              placeholder="Concurso"
+              className={inputClass}
+            />
+            <input
+              value={aiResearch.board}
+              onChange={(event) =>
+                setAiResearch((current) => ({
+                  ...current,
+                  board: event.target.value,
+                }))
+              }
+              placeholder="Banca"
+              className={inputClass}
+            />
+            <input
+              value={aiResearch.role}
+              onChange={(event) =>
+                setAiResearch((current) => ({
+                  ...current,
+                  role: event.target.value,
+                }))
+              }
+              placeholder="Cargo ou area"
+              className={inputClass}
+            />
+            <input
+              value={aiResearch.location}
+              onChange={(event) =>
+                setAiResearch((current) => ({
+                  ...current,
+                  location: event.target.value,
+                }))
+              }
+              placeholder="Orgao, cidade ou UF"
+              className={inputClass}
+            />
+            <textarea
+              value={aiResearch.details}
+              onChange={(event) =>
+                setAiResearch((current) => ({
+                  ...current,
+                  details: event.target.value,
+                }))
+              }
+              placeholder="Detalhes extras, edital, ano ou link"
+              className={`${inputClass} min-h-24 resize-y`}
+            />
+          </div>
+          <Button
+            type="button"
+            onClick={generateAiPlan}
+            disabled={aiLoading || loading}
+            className="mt-4 w-full"
+          >
+            {aiLoading ? "Pesquisando..." : "Pesquisar e gerar plano"}
+          </Button>
+
+          {aiError && (
+            <p className="mt-3 rounded-xl bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950 dark:text-red-200">
+              {aiError}
+            </p>
+          )}
+
+          {aiAnswer && (
+            <div className="mt-4 max-h-80 overflow-auto whitespace-pre-wrap rounded-xl bg-slate-50 p-4 text-sm leading-6 text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+              {aiAnswer}
+            </div>
+          )}
+
+          {aiSources.length > 0 && (
+            <div className="mt-4 space-y-2 text-sm">
+              <p className="font-semibold text-slate-800 dark:text-slate-100">
+                Fontes consultadas
+              </p>
+              {aiSources.slice(0, 5).map((source) => (
+                <a
+                  key={source.url}
+                  href={source.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="block truncate text-blue-600 hover:underline dark:text-blue-300"
+                >
+                  {source.title}
+                </a>
+              ))}
+            </div>
+          )}
+        </Card>
+
         <Card title="Meta semanal">
           <p className="text-sm text-slate-500 dark:text-slate-400">
             {Math.round(weeklyMinutes / 60)}h de {Math.round(weeklyGoal / 60)}h
